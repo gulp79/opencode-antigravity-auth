@@ -44,7 +44,7 @@ Keep this table authoritative. Every integration adds a row; a removed patch kee
 | Upstream PR | Title | Upstream commit | Fork commit | State | Notes |
 | --- | --- | --- | --- | --- | --- |
 | [#624](https://github.com/NoeFabris/opencode-antigravity-auth/pull/624) | Sanitize `tools.opencode.session_move` (HTTP 429 loop in OpenCode 2.2+) | `b523ee7` (2 commits) | `c1e5a2c` "fix google" | applied | Essential: without it single-account setups loop on `RESOURCE_EXHAUSTED`. Regression tests in `src/plugin/request.test.ts`. |
-| [#617](https://github.com/NoeFabris/opencode-antigravity-auth/pull/617) | Scrollable native quota dialog (weekly + 5-hour cards) | `b62dd36` (3 commits) | — | not applied | Merge simulation conflicts only in `src/tui.ts` and `src/tui.test.ts` (one hunk each, keymap command list / test list). `src/plugin.ts` merges cleanly. |
+| [#617](https://github.com/NoeFabris/opencode-antigravity-auth/pull/617) | Scrollable native quota dialog (weekly + 5-hour cards) | `b62dd36` (3 commits) | `db7b5ee` (merge `419cf13`) | applied | Conflicts in `src/tui.ts` and `src/tui.test.ts` resolved by keeping all commands (`/antigravity`, `/quota` from #617, `/limits` from #624) and both tests. Deviates from the PR: `@opentui/core`, `@opentui/solid` and `solid-js` moved to `dependencies` (see below). |
 
 ### Integration procedure
 
@@ -55,11 +55,13 @@ Keep this table authoritative. Every integration adds a row; a removed patch kee
 5. Add the row to the table above with upstream commit, fork merge commit and date.
 6. Build a new asset with the Build Fork workflow and smoke-test it on the host before relying on it.
 
-## Known risk: runtime dependencies of #617
+## Fork deviations for #617
 
-#617 adds `@opentui/core`, `@opentui/solid` and `solid-js` as **devDependencies**, while the compiled TSX dialog imports them at runtime. `@opencode/plugin@2.1.2` declares the same three packages as *optional peer dependencies*, so the OpenCode host is expected to provide them. The `-bundle.tar.gz` asset installs production dependencies only, so it will not contain them.
+The PR was written for the upstream monorepo layout; these fork-only changes make it work as a standalone package:
 
-If the plugin fails to load on the host after #617, move the three packages to `dependencies` in the fork and note the deviation in the table. Verify on the test host before promoting the build.
+1. **Runtime dependencies.** `@opentui/core`, `@opentui/solid` and `solid-js` are `devDependencies` upstream, but the compiled TSX dialog imports them at runtime and both the `.tgz` and the `-bundle.tar.gz` install with `--omit=dev`. They are moved to `dependencies` here. If upstream fixes this, take their layout and keep only the row in the table.
+2. **TypeScript peer.** `@opentui/core` → `bun-ffi-structs` declares `typescript` as a peer, so a production install still pulls TypeScript. `script/verify-package.mjs` now rejects a direct dependency on TypeScript instead of any occurrence, and logs the transitive origin.
+3. **CI diagnostics.** `.github/workflows/ci.yml` runs on `integrate/**` branches and prints the last packaging-verification lines as annotations, because Actions logs need authentication. Revert to the upstream step once the branch is merged if the fork does not need it.
 
 ## Files
 
