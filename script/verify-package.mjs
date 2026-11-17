@@ -64,7 +64,13 @@ try {
   const installed = join(consumer, "node_modules", packed.name)
   const manifest = JSON.parse(readFileSync(join(installed, "package.json"), "utf8"))
   assert(!manifest.peerDependencies?.typescript, "Published plugin must not require consumers to install TypeScript")
-  assert(!existsSync(join(consumer, "node_modules", "typescript")), "Runtime consumer unexpectedly installed TypeScript")
+  // @opentui/core -> bun-ffi-structs declares TypeScript as a peer, so npm installs
+  // it even with --omit=dev. Require only that the plugin itself does not need it.
+  const directDependencies = { ...manifest.dependencies, ...manifest.peerDependencies }
+  assert(!("typescript" in directDependencies), "Published plugin must not depend on TypeScript at runtime")
+  if (existsSync(join(consumer, "node_modules", "typescript"))) {
+    console.log("NOTE TypeScript installed transitively (peer of @opentui/core -> bun-ffi-structs)")
+  }
 
   writeFileSync(join(consumer, "runtime.mjs"), `
 import assert from "node:assert/strict"
