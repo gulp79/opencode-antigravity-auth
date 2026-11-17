@@ -161,6 +161,7 @@ describe("Antigravity native menu", () => {
     const limitsCommand = layer?.commands?.find(c => c.slash?.name === "limits")
     expect(limitsCommand).toBeDefined()
     expect(limitsCommand?.slash?.aliases).toContain("cuentas")
+  })
 
   it("registers /quota slash command without /usage and checks quotas directly", async () => {
     let layer: KeymapLayer | undefined
