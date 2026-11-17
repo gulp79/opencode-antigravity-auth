@@ -123,29 +123,37 @@ jobs:
           export INSTALLED="$STAGE/node_modules/$PACKAGE_NAME"
           [ -f "$INSTALLED/dist/index.js" ] || { echo "installed package is missing dist/index.js" >&2; exit 1; }
           node -e '
-            const { createRequire } = require("node:module")
-            const pkg = require(process.env.INSTALLED + "/package.json")
-            const req = createRequire(process.env.INSTALLED + "/package.json")
-            const runtime = [
-              "zod",
-              "proper-lockfile",
-              "xdg-basedir",
-              "@openauthjs/openauth/pkce",
-              "@opencode/plugin",
-              "@opencode/plugin/rpc",
-              "@opencode-ai/plugin/tool",
-            ]
-            const missing = runtime.filter((spec) => {
-              try { req.resolve(spec); return false } catch { return true }
-            })
+            const fs = require("node:fs")
+            const path = require("node:path")
+            const pkgDir = process.env.INSTALLED
+            const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"))
+
+            // Mirror Node resolution without honouring package "exports":
+            // several dependencies are ESM-only, so require.resolve() would fail
+            // even when they are correctly installed.
+            function findPackage(name) {
+              let dir = pkgDir
+              while (true) {
+                const candidate = path.join(dir, "node_modules", name)
+                if (fs.existsSync(path.join(candidate, "package.json"))) return candidate
+                const parent = path.dirname(dir)
+                if (parent === dir) return undefined
+                dir = parent
+              }
+            }
+
+            const missing = Object.keys(pkg.dependencies ?? {}).filter((name) => !findPackage(name))
             if (missing.length > 0) {
-              console.error("Unresolved runtime dependencies: " + missing.join(", "))
+              console.error("Missing dependencies in bundle: " + missing.join(", "))
               process.exit(1)
             }
+            const installed = fs.readdirSync(path.join(pkgDir, "..", ".."))
             console.log(
-              "bundle OK: " + pkg.name + "@" + pkg.version +
-              " with " + Object.keys(pkg.dependencies ?? {}).length + " declared dependencies"
+              "bundle OK: " + pkg.name + "@" + pkg.version + " with " +
+              Object.keys(pkg.dependencies ?? {}).length + " declared and all dependencies present in " +
+              path.join(pkgDir, "..", "..")
             )
+            console.log("top-level node_modules entries: " + installed.length)
           '
           BUNDLE_NAME="${PACKAGE_NAME}-${VERSION}-bundle.tar.gz"
           tar -czf "$GITHUB_WORKSPACE/artifacts/$BUNDLE_NAME" -C "$STAGE" node_modules
