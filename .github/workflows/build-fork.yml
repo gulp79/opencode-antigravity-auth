@@ -1,0 +1,191 @@
+name: Build Fork
+
+# Build-only pipeline for forks: compiles the plugin, packs the tarball and,
+# optionally, attaches it to a pre-release of this repository.
+# It never publishes to npm, so it does not need NPM_TOKEN nor ownership of
+# the upstream package name.
+
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: 'Suffix for the release tag (default: fork.<run>)'
+        required: false
+        default: ''
+        type: string
+      create_release:
+        description: 'Attach the package to a pre-release'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-fork
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Resolve build identity
+        id: identity
+        env:
+          LABEL: ${{ inputs.label }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          NAME=$(node -p "require('./package.json').name")
+          SUFFIX="$LABEL"
+          if [ -z "$SUFFIX" ]; then
+            SUFFIX="fork.${{ github.run_number }}.${{ github.run_attempt }}"
+          fi
+          if ! [[ "$SUFFIX" =~ ^[0-9A-Za-z][0-9A-Za-z.-]*$ ]]; then
+            echo "ERROR: label '$SUFFIX' is not a valid tag suffix (allowed: A-Z a-z 0-9 . -)" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "package_name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}-${SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "Building $NAME@$VERSION as v${VERSION}-${SUFFIX} from $GITHUB_SHA"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: |
+          rm -rf -- dist
+          npm run build
+
+      - name: Verify build artifacts
+        run: |
+          set -euo pipefail
+          [ -f dist/index.js ] || { echo "dist/index.js missing" >&2; exit 1; }
+          [ -f dist/index.d.ts ] || { echo "dist/index.d.ts missing" >&2; exit 1; }
+          [ -d dist/src ] || { echo "dist/src/ missing" >&2; exit 1; }
+
+      - name: Pack release
+        id: package
+        env:
+          VERSION: ${{ steps.identity.outputs.version }}
+          PACKAGE_NAME: ${{ steps.identity.outputs.package_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          npm pack --ignore-scripts --json --pack-destination artifacts > artifacts/pack.json
+          TARBALL=$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))[0].filename' artifacts/pack.json)
+          [ -f "artifacts/$TARBALL" ] || { echo "packed tarball not found" >&2; exit 1; }
+          tar -xOf "artifacts/$TARBALL" package/package.json | node -e '
+            const fs = require("node:fs")
+            const p = JSON.parse(fs.readFileSync(0, "utf8"))
+            if (p.name !== process.env.PACKAGE_NAME || p.version !== process.env.VERSION) {
+              throw new Error("Packed name/version does not match the checked out package.json")
+            }
+          '
+          echo "tarball=artifacts/$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "tarball_name=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "sha512=$(sha512sum "artifacts/$TARBALL" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.identity.outputs.tag }}
+          path: ${{ steps.package.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Write release notes
+        if: github.event.inputs.create_release == 'true'
+        id: notes
+        env:
+          TAG: ${{ steps.identity.outputs.tag }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          TARBALL_NAME: ${{ steps.package.outputs.tarball_name }}
+          SHA512: ${{ steps.package.outputs.sha512 }}
+        run: |
+          set -euo pipefail
+          BODY_FILE=$(mktemp)
+          {
+            echo "## Build ${TAG}"
+            echo ""
+            echo "Test build of \`${VERSION}\` from commit ${GITHUB_SHA} (\`${GITHUB_REF_NAME}\`). Not published to npm."
+            echo ""
+            echo "- SHA-512: \`${SHA512}\`"
+            echo ""
+            echo "### Install on the test server"
+            echo ""
+            printf '%s\n' '```bash'
+            echo "npm install -g https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${TARBALL_NAME}"
+            echo "npm prefix -g   # directory holding node_modules/opencode-antigravity-auth"
+            printf '%s\n' '```'
+            echo ""
+            echo "Then point OpenCode at the installed directory in \`~/.config/opencode/opencode.json\`:"
+            echo ""
+            printf '%s\n' '```json'
+            echo "{"
+            echo "  \"\$schema\": \"https://opencode.ai/config.json\","
+            echo "  \"plugin\": [\"/usr/local/lib/node_modules/opencode-antigravity-auth\"]"
+            echo "}"
+            printf '%s\n' '```'
+            echo ""
+            echo "Use the path printed by \`npm prefix -g\`; a path entry is not touched by the plugin auto-updater."
+            echo "Log in once with \`opencode auth login google\`."
+          } > "$BODY_FILE"
+          {
+            echo "body<<EOF"
+            cat "$BODY_FILE"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          cat "$BODY_FILE"
+
+      - name: Create pre-release
+        if: github.event.inputs.create_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.identity.outputs.tag }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          TARBALL: ${{ steps.package.outputs.tarball }}
+          BODY: ${{ steps.notes.outputs.body }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "ERROR: release $TAG already exists; use a different label" >&2
+            exit 1
+          fi
+          printf '%s\n' "$BODY" > release-notes.md
+          gh release create "$TAG" "$TARBALL" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Build $VERSION ($TAG)" \
+            --notes-file release-notes.md \
+            --prerelease
+
+      - name: Summary
+        run: |
+          {
+            echo "### Build ${{ steps.identity.outputs.tag }}"
+            echo "- Package: \`${{ steps.identity.outputs.package_name }}@${{ steps.identity.outputs.version }}\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Asset: \`${{ steps.package.outputs.tarball_name }}\`"
+            echo "- SHA-512: \`${{ steps.package.outputs.sha512 }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

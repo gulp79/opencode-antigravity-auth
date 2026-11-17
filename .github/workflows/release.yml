@@ -16,7 +16,9 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main'
+    # Upstream-only: forks cannot publish to the upstream npm package name.
+    # Fork builds are produced by build-fork.yml instead.
+    if: github.repository == 'NoeFabris/opencode-antigravity-auth' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
