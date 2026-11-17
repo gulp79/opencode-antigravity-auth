@@ -23,6 +23,16 @@ npm run test:e2e:regression          # E2E: regression suite
 
 No linter or formatter is configured. Style is enforced by convention (see below).
 
+## Fork Workflow
+
+This repository is the `gulp79` fork; `upstream` is `NoeFabris/opencode-antigravity-auth`. It is not published to npm.
+
+- Builds and test builds come from `.github/workflows/build-fork.yml` (manual dispatch): typecheck, tests, `npm run build`, then a `.tgz` plus a self-contained `-bundle.tar.gz` attached to a pre-release.
+- `.github/workflows/release.yml` (npm publish) is guarded to upstream and skipped here. Never bump the version or publish to npm from this fork.
+- Hosts are expected to load the plugin from a directory, not from `opencode-antigravity-auth@<version>` (that resolves to the upstream package).
+- Upstream pull requests applied here are tracked in [FORK.md](FORK.md). Read it before touching code covered by a carried patch, and update its table whenever a patch is integrated or reverted.
+- Write integration commits as `upstream(#<pr>): <title>`, and land them through a branch plus a pull request into `main` — never directly.
+
 ## TypeScript Configuration
 
 - `strict: true` with extra strictness: `noUncheckedIndexedAccess`, `noImplicitOverride`, `noFallthroughCasesInSwitch`
