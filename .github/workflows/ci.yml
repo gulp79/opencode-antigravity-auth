@@ -37,4 +37,15 @@ jobs:
         timeout-minutes: 10
         env:
           TMPDIR: ${{ runner.temp }}
-        run: node script/verify-package.mjs
+        run: |
+          set +e
+          node script/verify-package.mjs > verify-package.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            tail -n 25 verify-package.log | while IFS= read -r line; do
+              echo "::error::${line//$'\n'/ }"
+            done
+          else
+            tail -n 3 verify-package.log
+          fi
+          exit "$status"
