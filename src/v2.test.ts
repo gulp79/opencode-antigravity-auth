@@ -9,7 +9,9 @@ import type { IntegrationMethodRegistration } from "@opencode/plugin/promise/int
 import type { ModelEditor } from "@opencode/plugin/promise/model"
 import type { ProviderEditor } from "@opencode/plugin/promise/provider"
 import type { Info as ToolInfo, ToolContext } from "@opencode/plugin/promise/tool"
-import type { DeepMutable } from "@opencode/plugin/promise/types"
+type DeepMutable<T> = T extends Function | boolean | number | string | null | undefined
+  ? T
+  : { -readonly [P in keyof T]: DeepMutable<T[P]> }
 import type { RpcHandlers } from "@opencode/plugin/promise/rpc"
 import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
 

@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto"
 import type { Plugin } from "@opencode/plugin"
-import { AntigravityAccountsRpc, type AccountSummary } from "./account-rpc.ts"
+import { AntigravityAccountsRpc, type AccountSummary, type OpenAIAccountSummary } from "./account-rpc.ts"
 import { parseRefreshParts } from "./auth.ts"
+import { getOpenAIAccounts } from "./openai-accounts.ts"
 import { checkAccountsQuota } from "./quota.ts"
 import { formatAccountQuotaReport } from "./ui/quota.ts"
 import { accountTokenHash, loadAccounts, matchesAccountToken, saveAccountCredentials, updateAccountCredentials, updateAccounts, type AccountMetadataV3 } from "./storage.ts"
@@ -50,6 +51,7 @@ export interface AccountManager {
   quotas(options?: { id?: string }): Promise<{ report: string; accounts: Array<{ id: string; email: string; disabled: boolean; report: string }> }>
   update(options: { id: string; action: "enable" | "disable" | "select" | "delete" }): Promise<{ message: string }>
   models(): Promise<{ count: number }>
+  openai(): Promise<OpenAIAccountSummary[]>
 }
 
 export function createAccountManager(
@@ -191,7 +193,19 @@ export function createAccountManager(
     return { count: await refreshModels() }
   }
 
-  return { list, connections, quotas, update, models }
+  async function openai(): Promise<OpenAIAccountSummary[]> {
+    const accounts = await getOpenAIAccounts()
+    return accounts.map(account => ({
+      id: account.id,
+      label: account.label,
+      email: account.email,
+      plan: account.plan,
+      active: account.active,
+      expiresAt: account.expiresAt ? account.expiresAt.toISOString() : null,
+    }))
+  }
+
+  return { list, connections, quotas, update, models, openai }
 }
 
 /** Register RPC handlers for listing, selecting, deleting, and updating Antigravity accounts. */
@@ -211,6 +225,7 @@ export async function registerAccountManagement(
     quotas: ({ id }) => manager.quotas({ id }),
     update: ({ id, action }) => manager.update({ id, action }),
     models: () => manager.models(),
+    openai: () => manager.openai(),
   })
 
   return Object.assign(registration, { manager })

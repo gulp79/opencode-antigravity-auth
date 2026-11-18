@@ -76,6 +76,7 @@ function createMockManager(): AccountManager {
     }),
     models: vi.fn(async () => ({ count: 12 })),
     connections: vi.fn(async () => []),
+    openai: vi.fn(async () => []),
   }
 }
 

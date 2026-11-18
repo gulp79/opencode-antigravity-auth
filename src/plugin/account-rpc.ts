@@ -15,6 +15,15 @@ export const AccountSummary = z.object({
   }).optional(),
 })
 
+export const OpenAIAccountSummary = z.object({
+  id: z.string(),
+  label: z.string(),
+  email: z.string(),
+  plan: z.string(),
+  active: z.boolean(),
+  expiresAt: z.string().nullable(),
+})
+
 export const AntigravityAccountsRpc = Rpc.define({
   id: "antigravity.accounts",
   methods: {
@@ -29,8 +38,10 @@ export const AntigravityAccountsRpc = Rpc.define({
       output: z.object({ message: z.string() }),
     },
     models: { input: z.object({}), output: z.object({ count: z.number() }) },
+    openai: { input: z.object({}), output: z.array(OpenAIAccountSummary) },
   },
   events: {},
 })
 
 export type AccountSummary = z.infer<typeof AccountSummary>
+export type OpenAIAccountSummary = z.infer<typeof OpenAIAccountSummary>

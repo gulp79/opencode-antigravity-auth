@@ -83,6 +83,7 @@ jobs:
           [ -f dist/index.js ] || { echo "dist/index.js missing" >&2; exit 1; }
           [ -f dist/index.d.ts ] || { echo "dist/index.d.ts missing" >&2; exit 1; }
           [ -d dist/src ] || { echo "dist/src/ missing" >&2; exit 1; }
+          [ -f dist/gui-experimental.cjs ] || { echo "dist/gui-experimental.cjs missing" >&2; exit 1; }
 
       - name: Pack release
         id: package
