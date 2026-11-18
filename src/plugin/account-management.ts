@@ -44,15 +44,22 @@ function summarizeCachedQuota(account: AccountMetadataV3): AccountSummary["quota
   return quota
 }
 
-/** Register RPC handlers for listing, selecting, deleting, and updating Antigravity accounts. */
-export async function registerAccountManagement(
+export interface AccountManager {
+  list(): Promise<AccountSummary[]>
+  connections(id: string): Promise<string[]>
+  quotas(options?: { id?: string }): Promise<{ report: string; accounts: Array<{ id: string; email: string; disabled: boolean; report: string }> }>
+  update(options: { id: string; action: "enable" | "disable" | "select" | "delete" }): Promise<{ message: string }>
+  models(): Promise<{ count: number }>
+}
+
+export function createAccountManager(
   ctx: Plugin.Context,
   client: PluginClient,
   beforeWrite: () => Promise<void>,
   refreshModels: () => Promise<number>,
   afterWrite: () => Promise<void> = async () => undefined,
   runCredentialOperation: <T>(operation: () => Promise<T>) => Promise<T> = operation => operation(),
-) {
+): AccountManager {
   const readAccounts = loadManagedAccounts
 
   /** List saved accounts for UI display, omitting missing quota properties to ensure JSON compliance. */
@@ -73,6 +80,7 @@ export async function registerAccountManagement(
   // Resolving a native connection may refresh OAuth. Do this only for explicit
   // selection or deletion, never merely to display the saved-account menu.
   async function connections(id: string): Promise<string[]> {
+    await beforeWrite()
     const storage = await readAccounts()
     const account = storage?.accounts.find(item => accountID(item) === id)
     if (!account) return []
@@ -93,92 +101,117 @@ export async function registerAccountManagement(
     return ids
   }
 
-  return ctx.rpc.register(AntigravityAccountsRpc, {
-    list,
-    async connections({ id }) { await beforeWrite(); return { ids: await connections(id) } },
-    async quotas({ id }) {
-      return runCredentialOperation(async () => {
-        const storage = await readAccounts()
-        const accounts = (storage?.accounts ?? []).filter(account => !id || accountID(account) === id)
-        if (!accounts.length) return { report: "No saved accounts. Add a Google account first.", accounts: [] }
-        const results = await checkAccountsQuota(accounts, client, "google", { includeDisabled: !!id, onAccountUpdated: saveAccountCredentials })
-        const lines: string[] = []
-        const reports: Array<{ id: string; email: string; disabled: boolean; report: string }> = []
+  async function quotas(options?: { id?: string }) {
+    const id = options?.id
+    return runCredentialOperation(async () => {
+      const storage = await readAccounts()
+      const accounts = (storage?.accounts ?? []).filter(account => !id || accountID(account) === id)
+      if (!accounts.length) return { report: "No saved accounts. Add a Google account first.", accounts: [] }
+      const results = await checkAccountsQuota(accounts, client, "google", { includeDisabled: !!id, onAccountUpdated: saveAccountCredentials })
+      const lines: string[] = []
+      const reports: Array<{ id: string; email: string; disabled: boolean; report: string }> = []
+      for (const result of results) {
+        const original = accounts[result.index]
+        if (!original) continue
+        const formatted = formatAccountQuotaReport(result, { ansi: false })
+        reports.push({
+          id: accountID(original),
+          email: original.email ?? `Account ${result.index + 1}`,
+          disabled: result.disabled === true,
+          report: formatted,
+        })
+        lines.push(formatted, "")
+      }
+      await updateAccounts(latest => {
         for (const result of results) {
           const original = accounts[result.index]
           if (!original) continue
-          const formatted = formatAccountQuotaReport(result, { ansi: false })
-          reports.push({
-            id: accountID(original),
-            email: original.email ?? `Account ${result.index + 1}`,
-            disabled: result.disabled === true,
-            report: formatted,
-          })
-          lines.push(formatted, "")
-        }
-        await updateAccounts(latest => {
-          for (const result of results) {
-            const original = accounts[result.index]
-            if (!original) continue
-            const account = latest.accounts.find(item => accountID(item) === accountID(original))
-            if (account) {
-              if (result.updatedAccount && account.refreshToken === original.refreshToken) {
-                updateAccountCredentials(account, result.updatedAccount)
-              }
-              if (result.quota && !result.quota.error) {
-                account.cachedQuota = result.quota.groups
-                account.cachedQuotaUpdatedAt = Date.now()
-              }
+          const account = latest.accounts.find(item => accountID(item) === accountID(original))
+          if (account) {
+            if (result.updatedAccount && account.refreshToken === original.refreshToken) {
+              updateAccountCredentials(account, result.updatedAccount)
+            }
+            if (result.quota && !result.quota.error) {
+              account.cachedQuota = result.quota.groups
+              account.cachedQuotaUpdatedAt = Date.now()
             }
           }
+        }
       })
       return { report: lines.join("\n").trim(), accounts: reports }
-      })
-    },
-    async update({ id, action }) {
-      await beforeWrite()
-      const credentialID = action === "select" ? (await connections(id))[0] : undefined
-      const storage = await readAccounts()
-      const index = storage?.accounts.findIndex(account => accountID(account) === id) ?? -1
-      const account = storage?.accounts[index]
-      if (!storage || !account) throw new Error("Account no longer exists; reopen the menu.")
+    })
+  }
+
+  async function update({ id, action }: { id: string; action: "enable" | "disable" | "select" | "delete" }) {
+    await beforeWrite()
+    const credentialID = action === "select" ? (await connections(id))[0] : undefined
+    const storage = await readAccounts()
+    const index = storage?.accounts.findIndex(account => accountID(account) === id) ?? -1
+    const account = storage?.accounts[index]
+    if (!storage || !account) throw new Error("Account no longer exists; reopen the menu.")
+    if (action === "select" && account.enabled === false) throw new Error("Enable this account before selecting it.")
+    if (action === "select" && credentialID) await ctx.credential.activate({ credentialID })
+    // Keep a pool selection until the user switches the native connection.
+    if (action === "select") {
+      const active = await ctx.integration.connection.active("google")
+      await ctx.storage.set("pool-selection", active?.type === "credential" ? active.id : "pool")
+    }
+    await updateAccounts(storage => {
+      const index = storage.accounts.findIndex(account => accountID(account) === id)
+      const account = storage.accounts[index]
+      if (!account) throw new Error("Account no longer exists; reopen the menu.")
       if (action === "select" && account.enabled === false) throw new Error("Enable this account before selecting it.")
-      if (action === "select" && credentialID) await ctx.credential.activate({ credentialID })
-      // Keep a pool selection until the user switches the native connection.
+      if (action === "enable" || action === "disable") account.enabled = action === "enable"
       if (action === "select") {
-        const active = await ctx.integration.connection.active("google")
-        await ctx.storage.set("pool-selection", active?.type === "credential" ? active.id : "pool")
+        storage.activeIndex = index
+        storage.activeIndexByFamily = { claude: index, gemini: index }
       }
-      await updateAccounts(storage => {
-        const index = storage.accounts.findIndex(account => accountID(account) === id)
-        const account = storage.accounts[index]
-        if (!account) throw new Error("Account no longer exists; reopen the menu.")
-        if (action === "select" && account.enabled === false) throw new Error("Enable this account before selecting it.")
-        if (action === "enable" || action === "disable") account.enabled = action === "enable"
-        if (action === "select") {
-          storage.activeIndex = index
-          storage.activeIndexByFamily = { claude: index, gemini: index }
+      if (action === "delete") {
+        const cursors = { active: storage.accounts[storage.activeIndex], claude: storage.accounts[storage.activeIndexByFamily?.claude ?? storage.activeIndex], gemini: storage.accounts[storage.activeIndexByFamily?.gemini ?? storage.activeIndex] }
+        storage.accounts.splice(index, 1)
+        const cursor = (selected?: AccountMetadataV3) => {
+          const found = storage.accounts.findIndex(item => item === selected && item.enabled !== false)
+          return found >= 0 ? found : Math.max(0, storage.accounts.findIndex(item => item.enabled !== false))
         }
-        if (action === "delete") {
-          const cursors = { active: storage.accounts[storage.activeIndex], claude: storage.accounts[storage.activeIndexByFamily?.claude ?? storage.activeIndex], gemini: storage.accounts[storage.activeIndexByFamily?.gemini ?? storage.activeIndex] }
-          storage.accounts.splice(index, 1)
-          const cursor = (selected?: AccountMetadataV3) => {
-            const found = storage.accounts.findIndex(item => item === selected && item.enabled !== false)
-            return found >= 0 ? found : Math.max(0, storage.accounts.findIndex(item => item.enabled !== false))
-          }
-          storage.activeIndex = cursor(cursors.active)
-          storage.activeIndexByFamily = { claude: cursor(cursors.claude), gemini: cursor(cursors.gemini) }
-        } else {
-          if (storage.accounts[storage.activeIndex]?.enabled === false) {
-            storage.activeIndex = Math.max(0, storage.accounts.findIndex(item => item.enabled !== false))
-            storage.activeIndexByFamily = { claude: storage.activeIndex, gemini: storage.activeIndex }
-          }
+        storage.activeIndex = cursor(cursors.active)
+        storage.activeIndexByFamily = { claude: cursor(cursors.claude), gemini: cursor(cursors.gemini) }
+      } else {
+        if (storage.accounts[storage.activeIndex]?.enabled === false) {
+          storage.activeIndex = Math.max(0, storage.accounts.findIndex(item => item.enabled !== false))
+          storage.activeIndexByFamily = { claude: storage.activeIndex, gemini: storage.activeIndex }
         }
-      })
-      await ctx.storage.remove("model-catalog")
-      await afterWrite()
-      return { message: action === "select" ? "Account selected" : action === "delete" ? "Account deleted" : action === "enable" ? "Account enabled" : "Account disabled" }
-    },
-    async models() { return { count: await refreshModels() } },
+      }
+    })
+    await ctx.storage.remove("model-catalog")
+    await afterWrite()
+    return { message: action === "select" ? "Account selected" : action === "delete" ? "Account deleted" : action === "enable" ? "Account enabled" : "Account disabled" }
+  }
+
+  async function models() {
+    return { count: await refreshModels() }
+  }
+
+  return { list, connections, quotas, update, models }
+}
+
+/** Register RPC handlers for listing, selecting, deleting, and updating Antigravity accounts. */
+export async function registerAccountManagement(
+  ctx: Plugin.Context,
+  client: PluginClient,
+  beforeWrite: () => Promise<void>,
+  refreshModels: () => Promise<number>,
+  afterWrite: () => Promise<void> = async () => undefined,
+  runCredentialOperation: <T>(operation: () => Promise<T>) => Promise<T> = operation => operation(),
+) {
+  const manager = createAccountManager(ctx, client, beforeWrite, refreshModels, afterWrite, runCredentialOperation)
+
+  const registration = await ctx.rpc.register(AntigravityAccountsRpc, {
+    list: () => manager.list(),
+    connections: async ({ id }) => ({ ids: await manager.connections(id) }),
+    quotas: ({ id }) => manager.quotas({ id }),
+    update: ({ id, action }) => manager.update({ id, action }),
+    models: () => manager.models(),
   })
+
+  return Object.assign(registration, { manager })
 }

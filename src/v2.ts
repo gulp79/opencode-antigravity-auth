@@ -10,6 +10,7 @@ import { createAntigravityPlugin } from "./plugin.ts"
 import { accessTokenExpired, formatRefreshParts, parseRefreshParts } from "./plugin/auth.ts"
 import { OPENCODE_V2_MODEL_DEFINITIONS, buildAccountModelDefinitions, ModelCatalogCacheSchema } from "./plugin/config/models-v2.ts"
 import { accountID, accountPoolIdentity, accountCredentialsIdentity, loadManagedAccounts, registerAccountManagement } from "./plugin/account-management.ts"
+import { registerServerCommands } from "./plugin/commands.ts"
 import { checkAccountsQuota, type AvailableModel } from "./plugin/quota.ts"
 import { createLogger } from "./plugin/logger.ts"
 import { ensureProjectContext } from "./plugin/project.ts"
@@ -638,7 +639,7 @@ export const AntigravityV2Plugin = Plugin.define({
           },
         })
       }))
-      registrations.push(await registerAccountManagement(ctx, client, async () => {
+      const accountManagement = await registerAccountManagement(ctx, client, async () => {
         invalidateLoader()
         await transport.flush?.()
       }, refreshModels, async () => {
@@ -647,7 +648,9 @@ export const AntigravityV2Plugin = Plugin.define({
           try { await refreshModels() } catch (error) { log.warn("Model refresh unavailable", { error: String(error) }) }
         }
         await ctx.provider.reload()
-      }, runCredentialOperation))
+      }, runCredentialOperation)
+      registrations.push(accountManagement)
+      registrations.push(await registerServerCommands(ctx, accountManagement.manager))
       if (hasSavedAccounts && ctx.options.discoverModels !== false && (!validCache || Date.now() - (cached?.updatedAt ?? 0) > 3600_000)) {
         try { await refreshModels() } catch (error) { log.warn("Model discovery unavailable; using cached or fallback models", { error: String(error) }) }
       }
