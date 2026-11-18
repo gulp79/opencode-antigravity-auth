@@ -45,12 +45,13 @@ Keep this table authoritative. Every integration adds a row; a removed patch kee
 | --- | --- | --- | --- | --- | --- |
 | [#624](https://github.com/NoeFabris/opencode-antigravity-auth/pull/624) | Sanitize `tools.opencode.session_move` (HTTP 429 loop in OpenCode 2.2+) | `b523ee7` (2 commits) | `c1e5a2c` "fix google" | applied | Essential: without it single-account setups loop on `RESOURCE_EXHAUSTED`. Regression tests in `src/plugin/request.test.ts`. |
 | [#617](https://github.com/NoeFabris/opencode-antigravity-auth/pull/617) | Scrollable native quota dialog (weekly + 5-hour cards) | `b62dd36` (3 commits) | `db7b5ee` (merge `419cf13`) | applied | Conflicts in `src/tui.ts` and `src/tui.test.ts` resolved by keeping all commands (`/antigravity`, `/quota` from #617, `/limits` from #624) and both tests. Deviates from the PR: `@opentui/core`, `@opentui/solid` and `solid-js` moved to `dependencies` (see below). |
+| [#612](https://github.com/NoeFabris/opencode-antigravity-auth/pull/612) | Omit `undefined` quota properties from the account-list RPC payload (HTTP 500 `Expected JSON value at ["output"]` on OpenCode 2.2+) | `69d8cf7` (2 commits) | `6791536` (merge of `69d8cf7`) | applied | Conflict in `src/plugin/account-management.ts` was formatting only in `list()`: kept the compact object literal already present after #617; the conditional spreads in `summarizeCachedQuota()` merged cleanly. Fixes upstream issue #604. No fork deviation. |
 
 ### Integration procedure
 
 1. `git fetch https://github.com/NoeFabris/opencode-antigravity-auth.git refs/pull/<n>/head:refs/heads/tmp/pr-<n>`.
 2. Create `integrate/pr-<n>` from `main`, merge `tmp/pr-<n>`, resolve conflicts by keeping **both** behaviours (never drop an existing command, test or sanitizer from another carried PR).
-3. Push the branch, open a pull request into this fork's `main`, wait for CI (`typecheck`, `test`, `build`).
+3. Push the branch (`git push origin integrate/pr-<n>`) and wait for CI (`typecheck`, `test`, `build`).
 4. Merge with a message prefixed `upstream(#<n>): <title>`, so `git log --grep='upstream(#'` lists every carried patch.
 5. Add the row to the table above with upstream commit, fork merge commit and date.
 6. Build a new asset with the Build Fork workflow and smoke-test it on the host before relying on it.
