@@ -94,13 +94,14 @@ export default Plugin.define({
     function openAccountsDialog() {
       ctx.dialogs.open((dialog) => (
         <div style={{
-          padding: "20px",
           "max-width": "680px",
           "max-height": "85vh",
-          "overflow-y": "auto",
+          display: "flex",
+          "flex-direction": "column",
           background: "var(--background, #18181b)",
           "border-radius": "10px",
           border: "1px solid rgba(255, 255, 255, 0.1)",
+          overflow: "hidden",
         }}>
           <AccountsMainView onDone={dialog.close} />
         </div>
@@ -226,17 +227,57 @@ export default Plugin.define({
 
     function AccountsMainView(props: { onDone?: () => void }) {
       return (
-        <div style={{
-          display: "flex",
-          "flex-direction": "column",
-          gap: "16px",
-          padding: "16px",
-          height: "100%",
-          "overflow-y": "auto",
-          "box-sizing": "border-box",
-          "font-family": "system-ui, -apple-system, sans-serif",
-          color: "var(--foreground, #e4e4e7)",
-        }}>
+        <div
+          class="ag-scroll-container"
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            gap: "16px",
+            padding: "16px",
+            "padding-bottom": "32px",
+            height: "100%",
+            "max-height": "100%",
+            "min-height": "0",
+            flex: "1 1 0%",
+            "overflow-y": "auto",
+            "overflow-x": "hidden",
+            "box-sizing": "border-box",
+            "font-family": "system-ui, -apple-system, sans-serif",
+            color: "var(--foreground, #e4e4e7)",
+          }}
+        >
+          <style>{`
+            .ag-scroll-container {
+              scrollbar-width: thin;
+              scrollbar-color: rgba(255, 255, 255, 0.35) rgba(255, 255, 255, 0.05);
+            }
+            .ag-scroll-container::-webkit-scrollbar {
+              width: 8px;
+            }
+            .ag-scroll-container::-webkit-scrollbar-track {
+              background: rgba(255, 255, 255, 0.05);
+              border-radius: 4px;
+            }
+            .ag-scroll-container::-webkit-scrollbar-thumb {
+              background: rgba(255, 255, 255, 0.28);
+              border-radius: 4px;
+            }
+            .ag-scroll-container::-webkit-scrollbar-thumb:hover {
+              background: rgba(255, 255, 255, 0.45);
+            }
+            .ag-scroll-container pre::-webkit-scrollbar {
+              width: 6px;
+              height: 6px;
+            }
+            .ag-scroll-container pre::-webkit-scrollbar-track {
+              background: rgba(0, 0, 0, 0.2);
+              border-radius: 3px;
+            }
+            .ag-scroll-container pre::-webkit-scrollbar-thumb {
+              background: rgba(255, 255, 255, 0.2);
+              border-radius: 3px;
+            }
+          `}</style>
           {/* Header */}
           <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
             <div>
