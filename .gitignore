@@ -40,6 +40,9 @@ antigravity-debug-*.log
 # Test artifacts
 test-file.ts
 
+# Merge and sync prompt (fork maintenance)
+promptMerge.md
+
 # Local subrepos (not part of this project)
 CLIProxyAPI/
 LLM-API-Key-Proxy/
